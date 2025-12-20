@@ -7,7 +7,8 @@ EKS 集群 Terraform 配置，支持 Karpenter 自动扩缩容和 H100 GPU Spot 
 - **EKS 1.34** - Kubernetes 集群
 - **Karpenter** - 节点自动扩缩容
 - **AWS Load Balancer Controller** - ALB/NLB 支持
-- **NVIDIA Device Plugin** - GPU 资源管理
+- **NVIDIA GPU 支持** - Bottlerocket 自带 device plugin，无需额外安装
+- **SOCI Parallel Pull Mode** - 加速容器镜像拉取
 
 ## 部署的 AWS 资源
 
@@ -53,9 +54,10 @@ EKS 集群 Terraform 配置，支持 Karpenter 自动扩缩容和 H100 GPU Spot 
 | CloudWatch Log Group | 1 | EKS 日志 |
 | Security Group | 2 | Cluster SG, Node SG |
 | Helm Release | 2 | Karpenter, AWS LB Controller |
-| DaemonSet | 1 | NVIDIA Device Plugin |
 
 **总计约 100+ AWS 资源**
+
+> **注意**: NVIDIA Device Plugin 由 Bottlerocket AMI 自带，无需通过 Terraform 部署。
 
 ## 目录结构
 
@@ -71,7 +73,8 @@ terraform-gpu-spot-h100/
     ├── modules/                # EKS 子模块
     └── test/                   # 测试 YAML
         ├── inflate.yaml        # Karpenter 扩缩容测试
-        └── vllm-h100.yaml      # vLLM H100 推理服务
+        ├── vllm-h100.yaml      # vLLM H100 推理服务
+        └── wan2.1-h100.yaml    # 私有 ECR 镜像测试
 ```
 
 ## 快速开始
@@ -136,6 +139,107 @@ kubectl get pods -n kube-system
 - 容量类型: Spot
 - Taint: `nvidia.com/gpu=true:NoSchedule`
 - 用途: GPU 推理/训练
+
+## SOCI Parallel Pull Mode
+
+项目已启用 [SOCI (Seekable OCI) Parallel Pull Mode](https://aws.amazon.com/cn/blogs/containers/introducing-seekable-oci-parallel-pull-mode-for-amazon-eks/)，可显著加速容器镜像拉取。
+
+### 优势
+
+- **并行下载**: 同时下载多个镜像层，提升下载效率
+- **并行解压**: 同时解压多个镜像层，减少等待时间
+- **性能提升**: 对于 10GB+ 的大型 AI/ML 镜像，可减少约 60% 的拉取时间
+
+### 配置详情
+
+在 EC2NodeClass 的 `userData` 中配置 Bottlerocket SOCI 设置。
+
+**Default NodeClass (通用节点)**：
+
+```toml
+[settings.container-runtime]
+snapshotter = "soci"
+
+[settings.container-runtime-plugins.soci-snapshotter]
+pull-mode = "parallel-pull-unpack"
+
+[settings.container-runtime-plugins.soci-snapshotter.parallel-pull-unpack]
+max-concurrent-downloads-per-image = 10   # 每个镜像最大并行下载数
+concurrent-download-chunk-size = "16mb"    # 下载块大小
+max-concurrent-unpacks-per-image = 10      # 每个镜像最大并行解压数
+discard-unpacked-layers = true             # 解压后丢弃原始层
+```
+
+### H100 GPU 节点优化配置
+
+p5.48xlarge 是超高配置实例，针对其硬件特性进行了激进优化：
+
+| 资源 | 配置 |
+|------|------|
+| vCPU | 192 核 |
+| 内存 | 2TB |
+| 网络 | 3200 Gbps EFA |
+| Instance Store | 8x 3.84TB NVMe (RAID0) |
+
+**优化后的 SOCI 配置**：
+
+```toml
+[settings.container-runtime]
+snapshotter = "soci"
+
+[settings.container-runtime-plugins.soci-snapshotter]
+pull-mode = "parallel-pull-unpack"
+
+[settings.container-runtime-plugins.soci-snapshotter.parallel-pull-unpack]
+max-concurrent-downloads-per-image = 30   # 3200 Gbps 网络，大幅提升并发
+concurrent-download-chunk-size = "32mb"    # 更大块减少 HTTP 请求
+max-concurrent-unpacks-per-image = 30      # 192 核 CPU 充分并行解压
+discard-unpacked-layers = true
+
+# 将容器存储绑定到 instance store NVMe 盘以提升 IO 性能
+[settings.bootstrap-commands.k8s-ephemeral-storage]
+commands = [
+    ["apiclient", "ephemeral-storage", "init"],
+    ["apiclient", "ephemeral-storage", "bind", "--dirs", "/var/lib/containerd", "/var/lib/kubelet", "/var/log/pods", "/var/lib/soci-snapshotter"]
+]
+essential = true
+mode = "always"
+```
+
+**参数调优说明**：
+
+| 参数 | 默认值 | 通用节点 | H100 节点 | 说明 |
+|------|--------|----------|-----------|------|
+| max-concurrent-downloads-per-image | 3 | 10 | 30 | ECR 建议 10-20，高带宽可更高 |
+| concurrent-download-chunk-size | 层大小 | 16mb | 32mb | 更大块减少请求开销 |
+| max-concurrent-unpacks-per-image | 1 | 10 | 30 | 根据 CPU 核心数调整 |
+
+### 实测结果
+
+在 p5.48xlarge + SOCI Parallel Pull 优化配置下的实际测试：
+
+| 测试镜像 | 镜像大小 | 拉取时间 | 平均速度 |
+|----------|----------|----------|----------|
+| `public.ecr.aws/.../vllm` (Public ECR) | 14.24 GB | 2m27s (147s) | ~99 MB/s |
+| `<AWS_ACCOUNT_ID>.dkr.ecr.../vllm` (Private ECR) | 14.24 GB | **34.9s** | **~408 MB/s** |
+| `<AWS_ACCOUNT_ID>.dkr.ecr.../wan2.1` (Private ECR) | 10.97 GB | **29.7s** | **~370 MB/s** |
+
+**测试环境**：
+- 实例类型: p5.48xlarge (192 vCPU, 2TB RAM)
+- 存储: Instance Store NVMe (RAID0, 8x 3.84TB)
+- 测试日期: 2025-12-20
+- Region: us-west-2
+
+> **关键发现**：
+> - **Private ECR vs Public ECR**: 同一镜像 (vLLM 14.24GB)，私有 ECR 快 **4.2 倍**！
+> - **对比 AWS 官方基准** (m6i.8xlarge + SOCI 拉取 10GB 镜像: 45s)
+> - 本项目 p5.48xlarge 拉取 14.24GB 镜像仅需 **34.9s**，性能卓越！
+
+### 参考文档
+
+- [Introducing Seekable OCI Parallel Pull Mode for Amazon EKS](https://aws.amazon.com/cn/blogs/containers/introducing-seekable-oci-parallel-pull-mode-for-amazon-eks/)
+- [SOCI Snapshotter Karpenter Blueprint](https://github.com/aws-samples/karpenter-blueprints/tree/main/blueprints/soci-snapshotter)
+- [Bottlerocket SOCI Configuration](https://bottlerocket.dev/en/os/1.44.x/api/settings/container-runtime-plugins/#tag-soci-parallel-pull-configuration)
 
 ## 测试
 

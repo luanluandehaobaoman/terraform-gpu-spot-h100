@@ -234,6 +234,21 @@ resource "kubectl_manifest" "ec2nodeclass_default" {
         tags = { "karpenter.sh/discovery" = local.karpenter_discovery }
       }]
       tags = { "karpenter.sh/discovery" = local.karpenter_discovery }
+      # SOCI Parallel Pull Mode - 加速容器镜像拉取
+      # https://aws.amazon.com/cn/blogs/containers/introducing-seekable-oci-parallel-pull-mode-for-amazon-eks/
+      userData = <<-EOT
+        [settings.container-runtime]
+        snapshotter = "soci"
+
+        [settings.container-runtime-plugins.soci-snapshotter]
+        pull-mode = "parallel-pull-unpack"
+
+        [settings.container-runtime-plugins.soci-snapshotter.parallel-pull-unpack]
+        max-concurrent-downloads-per-image = 10
+        concurrent-download-chunk-size = "16mb"
+        max-concurrent-unpacks-per-image = 10
+        discard-unpacked-layers = true
+      EOT
     }
   })
   depends_on = [helm_release.karpenter]
@@ -290,6 +305,31 @@ resource "kubectl_manifest" "ec2nodeclass_h100" {
         "karpenter.sh/discovery" = local.karpenter_discovery
         "gpu-type"               = "h100"
       }
+      # SOCI Parallel Pull Mode - 加速大型 AI/ML 镜像拉取
+      # https://aws.amazon.com/cn/blogs/containers/introducing-seekable-oci-parallel-pull-mode-for-amazon-eks/
+      # p5.48xlarge 优化配置: 192 vCPU, 2TB RAM, 3200 Gbps 网络, 8x NVMe SSD
+      userData = <<-EOT
+        [settings.container-runtime]
+        snapshotter = "soci"
+
+        [settings.container-runtime-plugins.soci-snapshotter]
+        pull-mode = "parallel-pull-unpack"
+
+        [settings.container-runtime-plugins.soci-snapshotter.parallel-pull-unpack]
+        max-concurrent-downloads-per-image = 30
+        concurrent-download-chunk-size = "32mb"
+        max-concurrent-unpacks-per-image = 30
+        discard-unpacked-layers = true
+
+        # 将容器存储绑定到 instance store NVMe 盘以提升 IO 性能
+        [settings.bootstrap-commands.k8s-ephemeral-storage]
+        commands = [
+            ["apiclient", "ephemeral-storage", "init"],
+            ["apiclient", "ephemeral-storage", "bind", "--dirs", "/var/lib/containerd", "/var/lib/kubelet", "/var/log/pods", "/var/lib/soci-snapshotter"]
+        ]
+        essential = true
+        mode = "always"
+      EOT
     }
   })
   depends_on = [helm_release.karpenter]
@@ -634,78 +674,6 @@ resource "helm_release" "aws_load_balancer_controller" {
     aws_eks_pod_identity_association.aws_load_balancer_controller,
     module.eks
   ]
-}
-
-################################################################################
-# NVIDIA Device Plugin
-################################################################################
-
-resource "kubernetes_daemon_set_v1" "nvidia_device_plugin" {
-  metadata {
-    name      = "nvidia-device-plugin-daemonset"
-    namespace = "kube-system"
-  }
-
-  spec {
-    selector {
-      match_labels = {
-        name = "nvidia-device-plugin-ds"
-      }
-    }
-
-    strategy {
-      type = "RollingUpdate"
-    }
-
-    template {
-      metadata {
-        labels = {
-          name = "nvidia-device-plugin-ds"
-        }
-      }
-
-      spec {
-        toleration {
-          key      = "nvidia.com/gpu"
-          operator = "Exists"
-          effect   = "NoSchedule"
-        }
-
-        priority_class_name = "system-node-critical"
-
-        container {
-          name  = "nvidia-device-plugin-ctr"
-          image = "nvcr.io/nvidia/k8s-device-plugin:v0.17.1"
-
-          env {
-            name  = "FAIL_ON_INIT_ERROR"
-            value = "false"
-          }
-
-          security_context {
-            allow_privilege_escalation = false
-            capabilities {
-              drop = ["ALL"]
-            }
-          }
-
-          volume_mount {
-            name       = "device-plugin"
-            mount_path = "/var/lib/kubelet/device-plugins"
-          }
-        }
-
-        volume {
-          name = "device-plugin"
-          host_path {
-            path = "/var/lib/kubelet/device-plugins"
-          }
-        }
-      }
-    }
-  }
-
-  depends_on = [module.eks]
 }
 
 ################################################################################
