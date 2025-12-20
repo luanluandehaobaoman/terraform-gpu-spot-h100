@@ -1,0 +1,35 @@
+# wan2.1 镜像拉取测试 - 调度到 P5 (H100)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wan2-h100-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: wan2-h100-test
+  template:
+    metadata:
+      labels:
+        app: wan2-h100-test
+    spec:
+      nodeSelector:
+        node.kubernetes.io/instance-type: p5.48xlarge
+        karpenter.sh/nodepool: p5-gpu-h100
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+      - name: wan2
+        # 替换 <AWS_ACCOUNT_ID> 为你的 AWS 账户 ID
+        image: <AWS_ACCOUNT_ID>.dkr.ecr.us-west-2.amazonaws.com/wan2.1:latest
+        command: ["sleep", "infinity"]
+        resources:
+          requests:
+            nvidia.com/gpu: 1
+            memory: "50Gi"
+            cpu: "10"
+          limits:
+            nvidia.com/gpu: 1
+            memory: "50Gi"
