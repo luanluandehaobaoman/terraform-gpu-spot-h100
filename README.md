@@ -162,6 +162,45 @@ kubectl get pods -w
 | kubernetes_version | 1.34 | EKS 版本 |
 | vpc_cidr | 10.0.0.0/16 | VPC CIDR |
 
+## 部署到不同 Region
+
+默认部署到 `us-west-2`。如需部署到其他 Region，修改 `terraform-aws-eks/karpenter/main.tf` 中的 `locals` 块：
+
+```hcl
+locals {
+  name               = "eks-spot-gpu-${random_string.suffix.result}"
+  region             = "ap-northeast-1"  # 修改为目标 Region
+  # ...
+}
+```
+
+### 支持 H100 GPU 的 Region
+
+p5.48xlarge (H100) 实例仅在部分 Region 可用：
+
+| Region | 位置 |
+|--------|------|
+| us-east-1 | N. Virginia |
+| us-east-2 | Ohio |
+| us-west-2 | Oregon |
+| eu-west-1 | Ireland |
+| ap-northeast-1 | Tokyo |
+
+> **注意**: Spot 实例可用性因 Region 和时间而异。如果 H100 Spot 不可用，可以修改 NodePool 配置使用 On-Demand 或其他 GPU 实例类型。
+
+### 修改 GPU 实例类型
+
+如需使用其他 GPU 实例，修改 `main.tf` 中的 `nodepool_h100` 配置：
+
+```hcl
+# 例如改用 p4d.24xlarge (A100 GPU)
+requirements = [
+  { key = "karpenter.sh/capacity-type", operator = "In", values = ["spot", "on-demand"] },
+  { key = "kubernetes.io/arch", operator = "In", values = ["amd64"] },
+  { key = "node.kubernetes.io/instance-type", operator = "In", values = ["p4d.24xlarge"] }
+]
+```
+
 ## Terraform Outputs
 
 | Output | 说明 |
