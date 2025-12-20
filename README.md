@@ -174,20 +174,6 @@ locals {
 }
 ```
 
-### 支持 H100 GPU 的 Region
-
-p5.48xlarge (H100) 实例仅在部分 Region 可用：
-
-| Region | 位置 |
-|--------|------|
-| us-east-1 | N. Virginia |
-| us-east-2 | Ohio |
-| us-west-2 | Oregon |
-| eu-west-1 | Ireland |
-| ap-northeast-1 | Tokyo |
-
-> **注意**: Spot 实例可用性因 Region 和时间而异。如果 H100 Spot 不可用，可以修改 NodePool 配置使用 On-Demand 或其他 GPU 实例类型。
-
 ### 修改 GPU 实例类型
 
 如需使用其他 GPU 实例，修改 `main.tf` 中的 `nodepool_h100` 配置：
