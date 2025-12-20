@@ -27,6 +27,19 @@ provider "kubernetes" {
   }
 }
 
+provider "kubectl" {
+  apply_retry_count      = 5
+  host                   = module.eks.cluster_endpoint
+  cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
+  load_config_file       = false
+
+  exec {
+    api_version = "client.authentication.k8s.io/v1beta1"
+    command     = "aws"
+    args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--profile", "default"]
+  }
+}
+
 data "aws_availability_zones" "available" {
   # Exclude local zones
   filter {
@@ -201,10 +214,11 @@ resource "helm_release" "karpenter" {
 
 ################################################################################
 # Karpenter NodeClass & NodePool (auto-deployed via Terraform)
+# Using kubectl_manifest to avoid plan-time cluster connection requirement
 ################################################################################
 
-resource "kubernetes_manifest" "ec2nodeclass_default" {
-  manifest = {
+resource "kubectl_manifest" "ec2nodeclass_default" {
+  yaml_body = yamlencode({
     apiVersion = "karpenter.k8s.aws/v1"
     kind       = "EC2NodeClass"
     metadata = {
@@ -221,12 +235,12 @@ resource "kubernetes_manifest" "ec2nodeclass_default" {
       }]
       tags = { "karpenter.sh/discovery" = local.karpenter_discovery }
     }
-  }
+  })
   depends_on = [helm_release.karpenter]
 }
 
-resource "kubernetes_manifest" "nodepool_default" {
-  manifest = {
+resource "kubectl_manifest" "nodepool_default" {
+  yaml_body = yamlencode({
     apiVersion = "karpenter.sh/v1"
     kind       = "NodePool"
     metadata = {
@@ -251,12 +265,12 @@ resource "kubernetes_manifest" "nodepool_default" {
       limits     = { cpu = 1000 }
       disruption = { consolidationPolicy = "WhenEmpty", consolidateAfter = "30s" }
     }
-  }
-  depends_on = [kubernetes_manifest.ec2nodeclass_default]
+  })
+  depends_on = [kubectl_manifest.ec2nodeclass_default]
 }
 
-resource "kubernetes_manifest" "ec2nodeclass_h100" {
-  manifest = {
+resource "kubectl_manifest" "ec2nodeclass_h100" {
+  yaml_body = yamlencode({
     apiVersion = "karpenter.k8s.aws/v1"
     kind       = "EC2NodeClass"
     metadata = {
@@ -277,12 +291,12 @@ resource "kubernetes_manifest" "ec2nodeclass_h100" {
         "gpu-type"               = "h100"
       }
     }
-  }
+  })
   depends_on = [helm_release.karpenter]
 }
 
-resource "kubernetes_manifest" "nodepool_h100" {
-  manifest = {
+resource "kubectl_manifest" "nodepool_h100" {
+  yaml_body = yamlencode({
     apiVersion = "karpenter.sh/v1"
     kind       = "NodePool"
     metadata = {
@@ -309,8 +323,8 @@ resource "kubernetes_manifest" "nodepool_h100" {
         }
       }
     }
-  }
-  depends_on = [kubernetes_manifest.ec2nodeclass_h100]
+  })
+  depends_on = [kubectl_manifest.ec2nodeclass_h100]
 }
 
 ################################################################################
