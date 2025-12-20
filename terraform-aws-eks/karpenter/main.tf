@@ -1,5 +1,6 @@
 provider "aws" {
-  region = local.region
+  region  = local.region
+  profile = "default"
 }
 
 provider "helm" {
@@ -10,8 +11,7 @@ provider "helm" {
     exec = {
       api_version = "client.authentication.k8s.io/v1beta1"
       command     = "aws"
-      # This requires the awscli to be installed locally where Terraform is executed
-      args = ["eks", "get-token", "--cluster-name", module.eks.cluster_name]
+      args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--profile", "default"]
     }
   }
 }
@@ -23,7 +23,7 @@ provider "kubernetes" {
   exec {
     api_version = "client.authentication.k8s.io/v1beta1"
     command     = "aws"
-    args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name]
+    args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--profile", "default"]
   }
 }
 
@@ -35,8 +35,14 @@ data "aws_availability_zones" "available" {
   }
 }
 
+provider "aws" {
+  alias   = "virginia"
+  region  = "us-east-1"
+  profile = "default"
+}
+
 data "aws_ecrpublic_authorization_token" "token" {
-  region = "us-east-1"
+  provider = aws.virginia
 }
 
 resource "random_string" "suffix" {
@@ -65,7 +71,7 @@ locals {
 ################################################################################
 
 module "eks" {
-  source = ".."
+  source = "./.."
 
   name               = local.name
   kubernetes_version = "1.34"
@@ -126,7 +132,7 @@ module "eks" {
 ################################################################################
 
 module "karpenter" {
-  source = "../modules/karpenter"
+  source = "./../modules/karpenter"
 
   cluster_name = module.eks.cluster_name
 
@@ -144,7 +150,7 @@ module "karpenter" {
 }
 
 module "karpenter_disabled" {
-  source = "../modules/karpenter"
+  source = "./../modules/karpenter"
 
   create = false
 }
@@ -468,25 +474,15 @@ resource "helm_release" "aws_load_balancer_controller" {
   version    = "1.11.0"
   wait       = true
 
-  set {
-    name  = "clusterName"
-    value = module.eks.cluster_name
-  }
-
-  set {
-    name  = "serviceAccount.name"
-    value = "aws-load-balancer-controller"
-  }
-
-  set {
-    name  = "vpcId"
-    value = module.vpc.vpc_id
-  }
-
-  set {
-    name  = "region"
-    value = local.region
-  }
+  values = [
+    <<-EOT
+    clusterName: ${module.eks.cluster_name}
+    serviceAccount:
+      name: aws-load-balancer-controller
+    vpcId: ${module.vpc.vpc_id}
+    region: ${local.region}
+    EOT
+  ]
 
   depends_on = [
     aws_eks_pod_identity_association.aws_load_balancer_controller,
@@ -498,7 +494,7 @@ resource "helm_release" "aws_load_balancer_controller" {
 # NVIDIA Device Plugin
 ################################################################################
 
-resource "kubernetes_daemonset" "nvidia_device_plugin" {
+resource "kubernetes_daemon_set_v1" "nvidia_device_plugin" {
   metadata {
     name      = "nvidia-device-plugin-daemonset"
     namespace = "kube-system"
