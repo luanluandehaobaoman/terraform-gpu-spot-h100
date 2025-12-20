@@ -7,7 +7,7 @@ EKS 集群 Terraform 配置，支持 Karpenter 自动扩缩容和 H100 GPU Spot 
 - **EKS 1.34** - Kubernetes 集群
 - **Karpenter** - 节点自动扩缩容
 - **AWS Load Balancer Controller** - ALB/NLB 支持
-- **NVIDIA Device Plugin** - GPU 资源管理
+- **NVIDIA GPU 支持** - Bottlerocket 自带 device plugin，无需额外安装
 - **SOCI Parallel Pull Mode** - 加速容器镜像拉取
 
 ## 部署的 AWS 资源
@@ -54,9 +54,10 @@ EKS 集群 Terraform 配置，支持 Karpenter 自动扩缩容和 H100 GPU Spot 
 | CloudWatch Log Group | 1 | EKS 日志 |
 | Security Group | 2 | Cluster SG, Node SG |
 | Helm Release | 2 | Karpenter, AWS LB Controller |
-| DaemonSet | 1 | NVIDIA Device Plugin |
 
 **总计约 100+ AWS 资源**
+
+> **注意**: NVIDIA Device Plugin 由 Bottlerocket AMI 自带，无需通过 Terraform 部署。
 
 ## 目录结构
 
