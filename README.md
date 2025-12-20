@@ -219,8 +219,9 @@ mode = "always"
 
 | 测试镜像 | 镜像大小 | 拉取时间 | 平均速度 |
 |----------|----------|----------|----------|
-| `public.ecr.aws/.../vllm:0.11.2-gpu-py312-ec2-soci` | 14.24 GB | 2m27s (147s) | ~99 MB/s |
-| `<AWS_ACCOUNT_ID>.dkr.ecr.us-west-2.amazonaws.com/wan2.1` | 10.97 GB | **29.7s** | **~370 MB/s** |
+| `public.ecr.aws/.../vllm` (Public ECR) | 14.24 GB | 2m27s (147s) | ~99 MB/s |
+| `<AWS_ACCOUNT_ID>.dkr.ecr.../vllm` (Private ECR) | 14.24 GB | **34.9s** | **~408 MB/s** |
+| `<AWS_ACCOUNT_ID>.dkr.ecr.../wan2.1` (Private ECR) | 10.97 GB | **29.7s** | **~370 MB/s** |
 
 **测试环境**：
 - 实例类型: p5.48xlarge (192 vCPU, 2TB RAM)
@@ -228,11 +229,10 @@ mode = "always"
 - 测试日期: 2025-12-20
 - Region: us-west-2
 
-> **对比 AWS 官方基准** (m6i.8xlarge 拉取 10GB vLLM 镜像)：
-> - 默认 containerd: 1m52s
-> - SOCI Parallel Pull: 45s
->
-> 本项目 p5.48xlarge 拉取 10.97GB 镜像仅需 **29.7s**，比 AWS 基准快约 **34%**！
+> **关键发现**：
+> - **Private ECR vs Public ECR**: 同一镜像 (vLLM 14.24GB)，私有 ECR 快 **4.2 倍**！
+> - **对比 AWS 官方基准** (m6i.8xlarge + SOCI 拉取 10GB 镜像: 45s)
+> - 本项目 p5.48xlarge 拉取 14.24GB 镜像仅需 **34.9s**，性能卓越！
 
 ### 参考文档
 
