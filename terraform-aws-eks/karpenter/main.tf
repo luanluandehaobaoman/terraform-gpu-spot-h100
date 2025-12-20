@@ -200,31 +200,117 @@ resource "helm_release" "karpenter" {
 }
 
 ################################################################################
-# Karpenter NodeClass & NodePool (auto-deployed)
+# Karpenter NodeClass & NodePool (auto-deployed via Terraform)
 ################################################################################
 
-resource "local_file" "karpenter_manifest" {
-  content = templatefile("${path.module}/karpenter.yaml.tpl", {
-    karpenter_discovery = local.karpenter_discovery
-    karpenter_node_role = local.karpenter_discovery
-  })
-  filename = "${path.module}/karpenter-generated.yaml"
+resource "kubernetes_manifest" "ec2nodeclass_default" {
+  manifest = {
+    apiVersion = "karpenter.k8s.aws/v1"
+    kind       = "EC2NodeClass"
+    metadata = {
+      name = "default"
+    }
+    spec = {
+      amiSelectorTerms = [{ alias = "bottlerocket@latest" }]
+      role             = local.karpenter_discovery
+      subnetSelectorTerms = [{
+        tags = { "karpenter.sh/discovery" = local.karpenter_discovery }
+      }]
+      securityGroupSelectorTerms = [{
+        tags = { "karpenter.sh/discovery" = local.karpenter_discovery }
+      }]
+      tags = { "karpenter.sh/discovery" = local.karpenter_discovery }
+    }
+  }
+  depends_on = [helm_release.karpenter]
 }
 
-resource "null_resource" "karpenter_resources" {
-  triggers = {
-    karpenter_release = helm_release.karpenter.version
-    manifest_hash     = local_file.karpenter_manifest.content_md5
+resource "kubernetes_manifest" "nodepool_default" {
+  manifest = {
+    apiVersion = "karpenter.sh/v1"
+    kind       = "NodePool"
+    metadata = {
+      name = "default"
+    }
+    spec = {
+      template = {
+        spec = {
+          nodeClassRef = {
+            group = "karpenter.k8s.aws"
+            kind  = "EC2NodeClass"
+            name  = "default"
+          }
+          requirements = [
+            { key = "karpenter.k8s.aws/instance-category", operator = "In", values = ["c", "m", "r"] },
+            { key = "karpenter.k8s.aws/instance-cpu", operator = "In", values = ["4", "8", "16", "32"] },
+            { key = "karpenter.k8s.aws/instance-hypervisor", operator = "In", values = ["nitro"] },
+            { key = "karpenter.k8s.aws/instance-generation", operator = "Gt", values = ["2"] }
+          ]
+        }
+      }
+      limits     = { cpu = 1000 }
+      disruption = { consolidationPolicy = "WhenEmpty", consolidateAfter = "30s" }
+    }
   }
+  depends_on = [kubernetes_manifest.ec2nodeclass_default]
+}
 
-  provisioner "local-exec" {
-    command = <<-EOT
-      aws eks update-kubeconfig --name ${module.eks.cluster_name} --region ${local.region} --profile default
-      kubectl apply -f ${local_file.karpenter_manifest.filename}
-    EOT
+resource "kubernetes_manifest" "ec2nodeclass_h100" {
+  manifest = {
+    apiVersion = "karpenter.k8s.aws/v1"
+    kind       = "EC2NodeClass"
+    metadata = {
+      name = "h100-gpu"
+    }
+    spec = {
+      amiSelectorTerms    = [{ alias = "bottlerocket@latest" }]
+      role                = local.karpenter_discovery
+      instanceStorePolicy = "RAID0"
+      securityGroupSelectorTerms = [{
+        tags = { "karpenter.sh/discovery" = local.karpenter_discovery }
+      }]
+      subnetSelectorTerms = [{
+        tags = { "karpenter.sh/discovery" = local.karpenter_discovery }
+      }]
+      tags = {
+        "karpenter.sh/discovery" = local.karpenter_discovery
+        "gpu-type"               = "h100"
+      }
+    }
   }
+  depends_on = [helm_release.karpenter]
+}
 
-  depends_on = [helm_release.karpenter, local_file.karpenter_manifest]
+resource "kubernetes_manifest" "nodepool_h100" {
+  manifest = {
+    apiVersion = "karpenter.sh/v1"
+    kind       = "NodePool"
+    metadata = {
+      name = "p5-gpu-h100"
+    }
+    spec = {
+      disruption = { consolidateAfter = "1h", consolidationPolicy = "WhenEmpty" }
+      template = {
+        metadata = {
+          labels = { "gpu-type" = "h100", "nodepool" = "p5-gpu-h100" }
+        }
+        spec = {
+          nodeClassRef = {
+            group = "karpenter.k8s.aws"
+            kind  = "EC2NodeClass"
+            name  = "h100-gpu"
+          }
+          requirements = [
+            { key = "karpenter.sh/capacity-type", operator = "In", values = ["spot"] },
+            { key = "kubernetes.io/arch", operator = "In", values = ["amd64"] },
+            { key = "node.kubernetes.io/instance-type", operator = "In", values = ["p5.48xlarge"] }
+          ]
+          taints = [{ key = "nvidia.com/gpu", value = "true", effect = "NoSchedule" }]
+        }
+      }
+    }
+  }
+  depends_on = [kubernetes_manifest.ec2nodeclass_h100]
 }
 
 ################################################################################
