@@ -601,6 +601,7 @@ resource "helm_release" "aws_load_balancer_controller" {
   chart      = "aws-load-balancer-controller"
   version    = "1.11.0"
   wait       = true
+  timeout    = 600
 
   values = [
     <<-EOT
@@ -609,6 +610,9 @@ resource "helm_release" "aws_load_balancer_controller" {
       name: aws-load-balancer-controller
     vpcId: ${module.vpc.vpc_id}
     region: ${local.region}
+    tolerations:
+      - key: CriticalAddonsOnly
+        operator: Exists
     EOT
   ]
 
