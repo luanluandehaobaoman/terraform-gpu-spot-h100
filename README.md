@@ -57,11 +57,7 @@ terraform apply
 aws eks update-kubeconfig --name <cluster-name> --region us-west-2 --profile default
 ```
 
-### 部署 Karpenter NodeClass/NodePool
-
-```bash
-kubectl apply -f karpenter.yaml
-```
+> **注意**: Karpenter NodeClass/NodePool 会在 `terraform apply` 时自动部署，无需手动操作。
 
 ## NodePool 配置
 

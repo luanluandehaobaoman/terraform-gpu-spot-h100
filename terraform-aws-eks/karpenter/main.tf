@@ -54,7 +54,7 @@ resource "random_string" "suffix" {
 locals {
   name               = "eks-spot-gpu-${random_string.suffix.result}"
   region             = "us-west-2"
-  karpenter_discovery = "eks-spot-gpu" # 固定值，与 karpenter.yaml 中的配置匹配
+  karpenter_discovery = local.name # 动态值，每个集群唯一，避免多集群 tag 冲突
 
   vpc_cidr = "10.0.0.0/16"
   azs      = slice(data.aws_availability_zones.available.names, 0, 3)
@@ -114,6 +114,16 @@ module "eks" {
         # Used to ensure Karpenter runs on nodes that it does not manage
         "karpenter.sh/controller" = "true"
       }
+
+      # Taint to prevent regular workloads from scheduling on this node group
+      # Only Karpenter and system components (with tolerations) can run here
+      taints = {
+        karpenter = {
+          key    = "CriticalAddonsOnly"
+          value  = "true"
+          effect = "NO_SCHEDULE"
+        }
+      }
     }
   }
 
@@ -168,12 +178,16 @@ resource "helm_release" "karpenter" {
   repository_password = data.aws_ecrpublic_authorization_token.token.password
   chart               = "karpenter"
   version             = "1.6.0"
-  wait                = false
+  wait                = true
+  wait_for_jobs       = true
 
   values = [
     <<-EOT
     nodeSelector:
       karpenter.sh/controller: 'true'
+    tolerations:
+      - key: CriticalAddonsOnly
+        operator: Exists
     dnsPolicy: Default
     settings:
       clusterName: ${module.eks.cluster_name}
@@ -183,6 +197,34 @@ resource "helm_release" "karpenter" {
       enabled: false
     EOT
   ]
+}
+
+################################################################################
+# Karpenter NodeClass & NodePool (auto-deployed)
+################################################################################
+
+resource "local_file" "karpenter_manifest" {
+  content = templatefile("${path.module}/karpenter.yaml.tpl", {
+    karpenter_discovery = local.karpenter_discovery
+    karpenter_node_role = local.karpenter_discovery
+  })
+  filename = "${path.module}/karpenter-generated.yaml"
+}
+
+resource "null_resource" "karpenter_resources" {
+  triggers = {
+    karpenter_release = helm_release.karpenter.version
+    manifest_hash     = local_file.karpenter_manifest.content_md5
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      aws eks update-kubeconfig --name ${module.eks.cluster_name} --region ${local.region} --profile default
+      kubectl apply -f ${local_file.karpenter_manifest.filename}
+    EOT
+  }
+
+  depends_on = [helm_release.karpenter, local_file.karpenter_manifest]
 }
 
 ################################################################################
