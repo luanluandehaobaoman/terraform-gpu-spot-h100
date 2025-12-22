@@ -14,6 +14,11 @@ provider "helm" {
       args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--profile", "default"]
     }
   }
+
+  # Isolate Helm cache from local Helm CLI to avoid cache conflicts
+  # This prevents errors like "no cached repo found" when local Helm repos are corrupted
+  repository_cache       = "${path.module}/.helm/cache"
+  repository_config_path = "${path.module}/.helm/repositories.yaml"
 }
 
 provider "kubernetes" {

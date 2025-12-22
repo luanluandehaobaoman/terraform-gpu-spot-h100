@@ -1,1 +1,4 @@
 karpenter-generated.yaml
+
+# Helm provider cache (isolated from local Helm CLI)
+.helm/
