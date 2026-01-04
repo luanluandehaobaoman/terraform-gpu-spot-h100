@@ -275,6 +275,7 @@ resource "kubectl_manifest" "nodepool_default" {
             name  = "default"
           }
           requirements = [
+            { key = "kubernetes.io/arch", operator = "In", values = ["amd64"] },
             { key = "karpenter.k8s.aws/instance-category", operator = "In", values = ["c", "m", "r"] },
             { key = "karpenter.k8s.aws/instance-cpu", operator = "In", values = ["4", "8", "16", "32"] },
             { key = "karpenter.k8s.aws/instance-hypervisor", operator = "In", values = ["nitro"] },
