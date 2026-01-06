@@ -4,7 +4,7 @@ EKS 集群 Terraform 配置，支持 Karpenter 自动扩缩容和 H100 GPU Spot 
 
 ## 架构
 
-- **EKS 1.34** - Kubernetes 集群
+- **EKS 1.33** - Kubernetes 集群
 - **Karpenter** - 节点自动扩缩容
 - **AWS Load Balancer Controller** - ALB/NLB 支持
 - **NVIDIA GPU 支持** - Bottlerocket 自带 device plugin，无需额外安装
@@ -28,7 +28,7 @@ EKS 集群 Terraform 配置，支持 Karpenter 自动扩缩容和 H100 GPU Spot 
 ### EKS 资源
 | 资源 | 数量 | 说明 |
 |------|------|------|
-| EKS Cluster | 1 | Kubernetes 1.34 |
+| EKS Cluster | 1 | Kubernetes 1.33 |
 | EKS Managed Node Group | 1 | 2x m5.large (Karpenter 控制节点) |
 | EKS Addons | 4 | coredns, kube-proxy, vpc-cni, eks-pod-identity-agent |
 
@@ -263,7 +263,7 @@ kubectl get pods -w
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | region | us-west-2 | AWS Region |
-| kubernetes_version | 1.34 | EKS 版本 |
+| kubernetes_version | 1.33 | EKS 版本 |
 | vpc_cidr | 10.0.0.0/16 | VPC CIDR |
 
 ## 部署到不同 Region
