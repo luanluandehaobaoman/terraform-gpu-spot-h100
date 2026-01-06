@@ -92,7 +92,7 @@ module "eks" {
   source = "./.."
 
   name               = local.name
-  kubernetes_version = "1.34"
+  kubernetes_version = "1.33"
 
   # Gives Terraform identity admin access to cluster which will
   # allow deploying resources (Karpenter) into the cluster
