@@ -88,14 +88,38 @@ GPU NodePool 带有 Taint `nvidia.com/gpu=true:NoSchedule`，需要在 Pod 中�
 
 ## SOCI Parallel Pull Mode
 
-已启用 [SOCI Parallel Pull](https://aws.amazon.com/cn/blogs/containers/introducing-seekable-oci-parallel-pull-mode-for-amazon-eks/) 加速镜像拉取：
+已启用 [SOCI Parallel Pull](https://aws.amazon.com/cn/blogs/containers/introducing-seekable-oci-parallel-pull-mode-for-amazon-eks/) 加速镜像拉取，对 10GB+ 的大型 AI/ML 镜像可减少约 60% 拉取时间。
 
-| 节点类型 | 并发下载 | 块大小 | 适用场景 |
+### 配置参数
+
+| 节点类型 | 并发下载 | 块大小 | 并发解压 |
 |----------|----------|--------|----------|
-| 通用节点 | 10 | 16MB | 常规镜像 |
-| GPU 节点 | 30 | 32MB | 大型 AI/ML 镜像 |
+| 通用节点 | 10 | 16MB | 10 |
+| GPU 节点 | 30 | 32MB | 30 |
 
-实测：14GB 镜像在 Private ECR 上 **35 秒**完成拉取（~408 MB/s）。
+GPU 节点额外配置了 NVMe 实例存储绑定，提升 IO 性能：
+
+```toml
+[settings.bootstrap-commands.k8s-ephemeral-storage]
+commands = [
+    ["apiclient", "ephemeral-storage", "init"],
+    ["apiclient", "ephemeral-storage", "bind", "--dirs", "/var/lib/containerd", "/var/lib/kubelet"]
+]
+```
+
+### 实测结果
+
+| 镜像源 | 镜像大小 | 拉取时间 | 速度 |
+|--------|----------|----------|------|
+| Public ECR | 14.24 GB | 2m27s | ~99 MB/s |
+| **Private ECR** | 14.24 GB | **35s** | **~408 MB/s** |
+
+> 💡 **建议**：将大型镜像复制到 Private ECR，可获得 4x 性能提升。
+
+### 参考文档
+
+- [SOCI Parallel Pull Mode 官方博客](https://aws.amazon.com/cn/blogs/containers/introducing-seekable-oci-parallel-pull-mode-for-amazon-eks/)
+- [Bottlerocket SOCI 配置](https://bottlerocket.dev/en/os/1.44.x/api/settings/container-runtime-plugins/)
 
 ## 测试
 
