@@ -69,11 +69,14 @@ EKS 集群 Terraform 配置，支持 Karpenter 自动扩缩容和 **GPU Spot 实
 terraform-eks-gpu-spot/
 ├── README.md
 └── terraform-aws-eks/
-    ├── karpenter/              # Terraform 入口
-    │   ├── main.tf             # 主配置
-    │   ├── versions.tf         # Provider 版本
-    │   ├── variables.tf
-    │   └── outputs.tf
+    ├── karpenter/              # Terraform 入口（主要工作目录）
+    │   ├── main.tf             # Provider、EKS、VPC 基础设施
+    │   ├── karpenter.tf        # Karpenter 模块和 Helm
+    │   ├── nodepools.tf        # EC2NodeClass 和 NodePool 定义
+    │   ├── alb-controller.tf   # AWS Load Balancer Controller
+    │   ├── variables.tf        # 可配置变量（region、GPU类型等）
+    │   ├── outputs.tf          # 输出变量
+    │   └── versions.tf         # Provider 版本要求
     ├── modules/                # EKS 子模块
     └── test/                   # 测试 YAML
         ├── inflate.yaml        # Karpenter 扩缩容测试
@@ -145,30 +148,49 @@ kubectl get pods -n kube-system
 
 ## 修改 GPU 实例类型
 
-默认使用 p5.48xlarge (H100)。如需使用其他 GPU 实例，修改 `main.tf` 中的 `nodepool_gpu` 配置：
+默认使用 p5.48xlarge (H100)。通过 `variables.tf` 中的变量配置 GPU 实例类型。
+
+### 方式 1：通过 terraform.tfvars 配置（推荐）
+
+创建 `terraform.tfvars` 文件：
 
 ```hcl
-# 示例：改用 p4d.24xlarge (A100)
-requirements = [
-  { key = "karpenter.sh/capacity-type", operator = "In", values = ["spot"] },
-  { key = "kubernetes.io/arch", operator = "In", values = ["amd64"] },
-  { key = "node.kubernetes.io/instance-type", operator = "In", values = ["p4d.24xlarge"] }
-]
+# 使用 A100
+gpu_instance_types = ["p4d.24xlarge"]
 
-# 示例：改用 g5.48xlarge (A10G)
-requirements = [
-  { key = "karpenter.sh/capacity-type", operator = "In", values = ["spot"] },
-  { key = "kubernetes.io/arch", operator = "In", values = ["amd64"] },
-  { key = "node.kubernetes.io/instance-type", operator = "In", values = ["g5.48xlarge"] }
-]
+# 或使用 A10G
+gpu_instance_types = ["g5.48xlarge"]
 
-# 示例：支持多种 GPU 实例（Karpenter 自动选择最优）
-requirements = [
-  { key = "karpenter.sh/capacity-type", operator = "In", values = ["spot"] },
-  { key = "kubernetes.io/arch", operator = "In", values = ["amd64"] },
-  { key = "node.kubernetes.io/instance-type", operator = "In", values = ["p5.48xlarge", "p4d.24xlarge", "g5.48xlarge"] }
-]
+# 或支持多种 GPU 实例（Karpenter 自动选择最优）
+gpu_instance_types = ["p5.48xlarge", "p4d.24xlarge", "g5.48xlarge"]
+
+# 修改部署 Region
+region = "ap-northeast-1"
 ```
+
+### 方式 2：通过命令行参数
+
+```bash
+# 部署到其他 Region
+terraform apply -var="region=ap-northeast-1"
+
+# 使用不同的 GPU 实例类型
+terraform apply -var='gpu_instance_types=["p4d.24xlarge"]'
+
+# 组合多个变量
+terraform apply -var="region=ap-northeast-1" -var='gpu_instance_types=["g5.48xlarge"]'
+```
+
+### 可配置变量
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `region` | us-west-2 | AWS Region |
+| `gpu_instance_types` | ["p5.48xlarge"] | GPU 实例类型列表 |
+| `gpu_capacity_type` | ["spot"] | 容量类型 (spot/on-demand) |
+| `vpc_cidr` | 10.0.0.0/16 | VPC CIDR |
+| `cluster_name_prefix` | eks-spot-gpu | 集群名称前缀 |
+| `karpenter_node_instance_types` | ["m5.large"] | Karpenter 控制节点实例类型 |
 
 ## SOCI Parallel Pull Mode
 
@@ -269,14 +291,6 @@ kubectl apply -f test/vllm-gpu.yaml
 kubectl get pods -w
 ```
 
-## 配置说明
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| region | us-west-2 | AWS Region |
-| kubernetes_version | 1.33 | EKS 版本 |
-| vpc_cidr | 10.0.0.0/16 | VPC CIDR |
-
 ### AZ 自动探测
 
 部署时会自动探测当前 region 的全部可用区（AZ），并在每个 AZ 创建 subnet。这样做的好处：
@@ -297,14 +311,15 @@ kubectl get pods -w
 
 ## 部署到不同 Region
 
-默认部署到 `us-west-2`。如需部署到其他 Region，修改 `terraform-aws-eks/karpenter/main.tf` 中的 `locals` 块：
+默认部署到 `us-west-2`。通过变量修改部署 Region：
 
-```hcl
-locals {
-  name               = "eks-spot-gpu-${random_string.suffix.result}"
-  region             = "ap-northeast-1"  # 修改为目标 Region
-  # ...
-}
+```bash
+# 方式 1: 命令行参数
+terraform apply -var="region=ap-northeast-1"
+
+# 方式 2: terraform.tfvars 文件
+echo 'region = "ap-northeast-1"' > terraform.tfvars
+terraform apply
 ```
 
 ## Terraform Outputs

@@ -19,7 +19,7 @@ output "cluster_version" {
 
 output "region" {
   description = "AWS region"
-  value       = local.region
+  value       = var.region
 }
 
 ################################################################################
@@ -28,5 +28,5 @@ output "region" {
 
 output "configure_kubectl" {
   description = "Command to configure kubectl"
-  value       = "aws eks update-kubeconfig --name ${module.eks.cluster_name} --region ${local.region} --profile default"
+  value       = "aws eks update-kubeconfig --name ${module.eks.cluster_name} --region ${var.region} --profile default"
 }
