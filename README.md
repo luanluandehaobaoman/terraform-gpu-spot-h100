@@ -18,12 +18,14 @@ EKS 集群 Terraform 配置，支持 Karpenter 自动扩缩容和 H100 GPU Spot 
 | 资源 | 数量 | 说明 |
 |------|------|------|
 | VPC | 1 | CIDR: 10.0.0.0/16 |
-| Public Subnet | 3 | 每个 AZ 一个 |
-| Private Subnet | 3 | 每个 AZ 一个，用于 EKS 节点 |
-| Intra Subnet | 3 | 每个 AZ 一个，用于 EKS Control Plane |
-| NAT Gateway | 1 | 单 NAT 网关 |
+| Public Subnet | N | 每个 AZ 一个（自动探测 region 的全部 AZ） |
+| Private Subnet | N | 每个 AZ 一个，用于 EKS 节点 |
+| Intra Subnet | N | 每个 AZ 一个，用于 EKS Control Plane |
+| NAT Gateway | 1 | 单 NAT 网关（成本优化） |
 | Internet Gateway | 1 | |
 | Elastic IP | 1 | NAT Gateway 使用 |
+
+> **注意**: Subnet 数量 N 取决于部署 region 的 AZ 数量。例如 us-west-2 有 4 个 AZ，则创建 4 个 Private/Public/Intra Subnet。
 
 ### EKS 资源
 | 资源 | 数量 | 说明 |
@@ -265,6 +267,24 @@ kubectl get pods -w
 | region | us-west-2 | AWS Region |
 | kubernetes_version | 1.33 | EKS 版本 |
 | vpc_cidr | 10.0.0.0/16 | VPC CIDR |
+
+### AZ 自动探测
+
+部署时会自动探测当前 region 的全部可用区（AZ），并在每个 AZ 创建 subnet。这样做的好处：
+
+1. **提高 Spot 获取成功率**: 更多 AZ = 更多 Spot 容量池，H100 等稀缺资源获取概率更高
+2. **更好的高可用性**: 工作负载可分散到更多 AZ
+3. **零额外成本**: 保持单一 NAT Gateway，不因 AZ 增加而增加成本
+
+**Subnet CIDR 分配策略** (VPC: 10.0.0.0/16):
+
+| Subnet 类型 | CIDR 范围 | 每个 Subnet | 可用 IP/AZ | 用途 |
+|-------------|-----------|-------------|------------|------|
+| Private | 10.0.0.0 - 10.0.127.255 | /20 | 4,091 | 工作节点和 Pod |
+| Public | 10.0.128.0 - 10.0.191.255 | /24 | 251 | NAT Gateway, ELB |
+| Intra | 10.0.192.0 - 10.0.255.255 | /24 | 251 | EKS Control Plane ENI |
+
+> 此配置最多支持 8 个 AZ，覆盖所有 AWS region。
 
 ## 部署到不同 Region
 

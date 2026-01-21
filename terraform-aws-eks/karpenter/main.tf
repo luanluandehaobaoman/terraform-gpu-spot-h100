@@ -75,7 +75,8 @@ locals {
   karpenter_discovery = local.name # 动态值，每个集群唯一，避免多集群 tag 冲突
 
   vpc_cidr = "10.0.0.0/16"
-  azs      = slice(data.aws_availability_zones.available.names, 0, 3)
+  # 自动探测并使用当前 region 的全部 AZ，提高 Spot 实例获取成功率
+  azs      = data.aws_availability_zones.available.names
 
   tags = {
     Example    = local.name
@@ -693,13 +694,18 @@ module "vpc" {
   name = local.name
   cidr = local.vpc_cidr
 
-  azs             = local.azs
+  azs = local.azs
+
+  # Subnet CIDR 分配策略（支持最多 8 个 AZ）:
+  # - Private /20: 10.0.0.0 - 10.0.127.255  (4,091 可用 IP/AZ，运行工作节点和 Pod)
+  # - Public  /24: 10.0.128.0 - 10.0.191.255 (251 可用 IP/AZ，运行 NAT Gateway 和 ELB)
+  # - Intra   /24: 10.0.192.0 - 10.0.255.255 (251 可用 IP/AZ，EKS Control Plane ENI)
   private_subnets = [for k, v in local.azs : cidrsubnet(local.vpc_cidr, 4, k)]
-  public_subnets  = [for k, v in local.azs : cidrsubnet(local.vpc_cidr, 8, k + 48)]
-  intra_subnets   = [for k, v in local.azs : cidrsubnet(local.vpc_cidr, 8, k + 52)]
+  public_subnets  = [for k, v in local.azs : cidrsubnet(local.vpc_cidr, 8, k + 128)]
+  intra_subnets   = [for k, v in local.azs : cidrsubnet(local.vpc_cidr, 8, k + 192)]
 
   enable_nat_gateway = true
-  single_nat_gateway = true
+  single_nat_gateway = true # 保持单一 NAT Gateway，节省成本（~$32/月 vs 多 AZ 的 ~$128/月）
 
   public_subnet_tags = {
     "kubernetes.io/role/elb" = 1
