@@ -1,21 +1,23 @@
-# vLLM 部署示例 - 调度到 P5 (H100)
+# vLLM 部署示例 - 调度到 GPU Spot 节点
+# 默认配置使用 p5.48xlarge (H100)，可修改 nodeSelector 使用其他 GPU 实例
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: gpt-oss-20b-h100
+  name: vllm-gpu-demo
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: vllm-gptoss-h100
+      app: vllm-gpu-demo
   template:
     metadata:
       labels:
-        app: vllm-gptoss-h100
+        app: vllm-gpu-demo
     spec:
       nodeSelector:
+        # 修改以下配置使用不同 GPU 实例类型
         node.kubernetes.io/instance-type: p5.48xlarge
-        karpenter.sh/nodepool: p5-gpu-h100
+        karpenter.sh/nodepool: gpu-spot
       tolerations:
         - key: nvidia.com/gpu
           operator: Exists
@@ -53,14 +55,14 @@ spec:
           medium: Memory
 
 ---
-# H100 服务
+# GPU 推理服务
 apiVersion: v1
 kind: Service
 metadata:
-  name: gptoss-service-h100
+  name: vllm-gpu-service
 spec:
   selector:
-    app: vllm-gptoss-h100
+    app: vllm-gpu-demo
   ports:
   - port: 8000
     targetPort: 8000

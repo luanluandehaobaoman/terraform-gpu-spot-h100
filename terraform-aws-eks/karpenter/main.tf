@@ -291,12 +291,15 @@ resource "kubectl_manifest" "nodepool_default" {
   depends_on = [kubectl_manifest.ec2nodeclass_default]
 }
 
-resource "kubectl_manifest" "ec2nodeclass_h100" {
+# GPU EC2NodeClass - 用于 GPU Spot 实例
+# 默认配置针对高配置 GPU 实例优化（如 p5.48xlarge）
+# 可根据实际使用的 GPU 实例类型调整 SOCI 参数
+resource "kubectl_manifest" "ec2nodeclass_gpu" {
   yaml_body = yamlencode({
     apiVersion = "karpenter.k8s.aws/v1"
     kind       = "EC2NodeClass"
     metadata = {
-      name = "h100-gpu"
+      name = "gpu"
     }
     spec = {
       amiSelectorTerms    = [{ alias = "bottlerocket@latest" }]
@@ -310,11 +313,11 @@ resource "kubectl_manifest" "ec2nodeclass_h100" {
       }]
       tags = {
         "karpenter.sh/discovery" = local.karpenter_discovery
-        "gpu-type"               = "h100"
+        "gpu-type"               = "nvidia"
       }
       # SOCI Parallel Pull Mode - 加速大型 AI/ML 镜像拉取
       # https://aws.amazon.com/cn/blogs/containers/introducing-seekable-oci-parallel-pull-mode-for-amazon-eks/
-      # p5.48xlarge 优化配置: 192 vCPU, 2TB RAM, 3200 Gbps 网络, 8x NVMe SSD
+      # 针对高配置 GPU 实例优化（高带宽网络、多核 CPU、NVMe SSD）
       userData = <<-EOT
         [settings.container-runtime]
         snapshotter = "soci"
@@ -342,28 +345,34 @@ resource "kubectl_manifest" "ec2nodeclass_h100" {
   depends_on = [helm_release.karpenter]
 }
 
-resource "kubectl_manifest" "nodepool_h100" {
+# GPU NodePool - Spot 实例
+# 默认使用 p5.48xlarge (H100) 作为示例，可修改 instance-type 使用其他 GPU 实例
+# 支持的 GPU 实例类型: p5.48xlarge (H100), p4d.24xlarge (A100), g5.48xlarge (A10G) 等
+resource "kubectl_manifest" "nodepool_gpu" {
   yaml_body = yamlencode({
     apiVersion = "karpenter.sh/v1"
     kind       = "NodePool"
     metadata = {
-      name = "p5-gpu-h100"
+      name = "gpu-spot"
     }
     spec = {
       disruption = { consolidateAfter = "1h", consolidationPolicy = "WhenEmpty" }
       template = {
         metadata = {
-          labels = { "gpu-type" = "h100", "nodepool" = "p5-gpu-h100" }
+          labels = { "gpu-type" = "nvidia", "nodepool" = "gpu-spot" }
         }
         spec = {
           nodeClassRef = {
             group = "karpenter.k8s.aws"
             kind  = "EC2NodeClass"
-            name  = "h100-gpu"
+            name  = "gpu"
           }
           requirements = [
             { key = "karpenter.sh/capacity-type", operator = "In", values = ["spot"] },
             { key = "kubernetes.io/arch", operator = "In", values = ["amd64"] },
+            # 默认使用 p5.48xlarge (H100)，可修改为其他 GPU 实例类型
+            # 示例: ["p4d.24xlarge"] (A100), ["g5.48xlarge"] (A10G)
+            # 或多种类型: ["p5.48xlarge", "p4d.24xlarge", "g5.48xlarge"]
             { key = "node.kubernetes.io/instance-type", operator = "In", values = ["p5.48xlarge"] }
           ]
           taints = [{ key = "nvidia.com/gpu", value = "true", effect = "NoSchedule" }]
@@ -371,7 +380,7 @@ resource "kubectl_manifest" "nodepool_h100" {
       }
     }
   })
-  depends_on = [kubectl_manifest.ec2nodeclass_h100]
+  depends_on = [kubectl_manifest.ec2nodeclass_gpu]
 }
 
 ################################################################################

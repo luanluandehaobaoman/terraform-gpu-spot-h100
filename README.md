@@ -1,6 +1,8 @@
-# Terraform GPU Spot H100
+# Terraform EKS GPU Spot
 
-EKS 集群 Terraform 配置，支持 Karpenter 自动扩缩容和 H100 GPU Spot 实例。
+EKS 集群 Terraform 配置，支持 Karpenter 自动扩缩容和 **GPU Spot 实例**。
+
+默认配置使用 H100 (p5.48xlarge) 作为示例，可轻松替换为其他 GPU 实例类型。
 
 ## 架构
 
@@ -37,8 +39,8 @@ EKS 集群 Terraform 配置，支持 Karpenter 自动扩缩容和 H100 GPU Spot 
 ### Karpenter 资源
 | 资源 | 数量 | 说明 |
 |------|------|------|
-| EC2NodeClass | 2 | default, h100-gpu |
-| NodePool | 2 | default (c/m/r 系列), p5-gpu-h100 (H100 GPU) |
+| EC2NodeClass | 2 | default, gpu |
+| NodePool | 2 | default (c/m/r 系列), gpu-spot (GPU 实例) |
 | SQS Queue | 1 | Spot 中断处理 |
 | CloudWatch Event Rules | 4 | Spot 中断、实例状态变更等 |
 
@@ -64,7 +66,7 @@ EKS 集群 Terraform 配置，支持 Karpenter 自动扩缩容和 H100 GPU Spot 
 ## 目录结构
 
 ```
-terraform-gpu-spot-h100/
+terraform-eks-gpu-spot/
 ├── README.md
 └── terraform-aws-eks/
     ├── karpenter/              # Terraform 入口
@@ -75,8 +77,7 @@ terraform-gpu-spot-h100/
     ├── modules/                # EKS 子模块
     └── test/                   # 测试 YAML
         ├── inflate.yaml        # Karpenter 扩缩容测试
-        ├── vllm-h100.yaml      # vLLM H100 推理服务
-        └── wan2.1-h100.yaml    # 私有 ECR 镜像测试
+        └── vllm-gpu.yaml       # vLLM GPU 推理服务示例
 ```
 
 ## 快速开始
@@ -136,11 +137,38 @@ kubectl get pods -n kube-system
 - 容量类型: Spot + On-Demand
 - 用途: 通用工作负载
 
-### H100 GPU NodePool (p5-gpu-h100)
-- 实例类型: p5.48xlarge (8x H100 GPU)
+### GPU NodePool (gpu-spot)
+- 实例类型: 可配置（默认 p5.48xlarge / H100）
 - 容量类型: Spot
 - Taint: `nvidia.com/gpu=true:NoSchedule`
 - 用途: GPU 推理/训练
+
+## 修改 GPU 实例类型
+
+默认使用 p5.48xlarge (H100)。如需使用其他 GPU 实例，修改 `main.tf` 中的 `nodepool_gpu` 配置：
+
+```hcl
+# 示例：改用 p4d.24xlarge (A100)
+requirements = [
+  { key = "karpenter.sh/capacity-type", operator = "In", values = ["spot"] },
+  { key = "kubernetes.io/arch", operator = "In", values = ["amd64"] },
+  { key = "node.kubernetes.io/instance-type", operator = "In", values = ["p4d.24xlarge"] }
+]
+
+# 示例：改用 g5.48xlarge (A10G)
+requirements = [
+  { key = "karpenter.sh/capacity-type", operator = "In", values = ["spot"] },
+  { key = "kubernetes.io/arch", operator = "In", values = ["amd64"] },
+  { key = "node.kubernetes.io/instance-type", operator = "In", values = ["g5.48xlarge"] }
+]
+
+# 示例：支持多种 GPU 实例（Karpenter 自动选择最优）
+requirements = [
+  { key = "karpenter.sh/capacity-type", operator = "In", values = ["spot"] },
+  { key = "kubernetes.io/arch", operator = "In", values = ["amd64"] },
+  { key = "node.kubernetes.io/instance-type", operator = "In", values = ["p5.48xlarge", "p4d.24xlarge", "g5.48xlarge"] }
+]
+```
 
 ## SOCI Parallel Pull Mode
 
@@ -172,18 +200,9 @@ max-concurrent-unpacks-per-image = 10      # 每个镜像最大并行解压数
 discard-unpacked-layers = true             # 解压后丢弃原始层
 ```
 
-### H100 GPU 节点优化配置
+### GPU 节点优化配置
 
-p5.48xlarge 是超高配置实例，针对其硬件特性进行了激进优化：
-
-| 资源 | 配置 |
-|------|------|
-| vCPU | 192 核 |
-| 内存 | 2TB |
-| 网络 | 3200 Gbps EFA |
-| Instance Store | 8x 3.84TB NVMe (RAID0) |
-
-**优化后的 SOCI 配置**：
+针对高配置 GPU 实例（如 p5.48xlarge）的优化配置：
 
 ```toml
 [settings.container-runtime]
@@ -193,9 +212,9 @@ snapshotter = "soci"
 pull-mode = "parallel-pull-unpack"
 
 [settings.container-runtime-plugins.soci-snapshotter.parallel-pull-unpack]
-max-concurrent-downloads-per-image = 30   # 3200 Gbps 网络，大幅提升并发
+max-concurrent-downloads-per-image = 30   # 高带宽网络，大幅提升并发
 concurrent-download-chunk-size = "32mb"    # 更大块减少 HTTP 请求
-max-concurrent-unpacks-per-image = 30      # 192 核 CPU 充分并行解压
+max-concurrent-unpacks-per-image = 30      # 多核 CPU 充分并行解压
 discard-unpacked-layers = true
 
 # 将容器存储绑定到 instance store NVMe 盘以提升 IO 性能
@@ -210,8 +229,8 @@ mode = "always"
 
 **参数调优说明**：
 
-| 参数 | 默认值 | 通用节点 | H100 节点 | 说明 |
-|------|--------|----------|-----------|------|
+| 参数 | 默认值 | 通用节点 | GPU 节点 | 说明 |
+|------|--------|----------|----------|------|
 | max-concurrent-downloads-per-image | 3 | 10 | 30 | ECR 建议 10-20，高带宽可更高 |
 | concurrent-download-chunk-size | 层大小 | 16mb | 32mb | 更大块减少请求开销 |
 | max-concurrent-unpacks-per-image | 1 | 10 | 30 | 根据 CPU 核心数调整 |
@@ -224,18 +243,8 @@ mode = "always"
 |----------|----------|----------|----------|
 | `public.ecr.aws/.../vllm` (Public ECR) | 14.24 GB | 2m27s (147s) | ~99 MB/s |
 | `<AWS_ACCOUNT_ID>.dkr.ecr.../vllm` (Private ECR) | 14.24 GB | **34.9s** | **~408 MB/s** |
-| `<AWS_ACCOUNT_ID>.dkr.ecr.../wan2.1` (Private ECR) | 10.97 GB | **29.7s** | **~370 MB/s** |
 
-**测试环境**：
-- 实例类型: p5.48xlarge (192 vCPU, 2TB RAM)
-- 存储: Instance Store NVMe (RAID0, 8x 3.84TB)
-- 测试日期: 2025-12-20
-- Region: us-west-2
-
-> **关键发现**：
-> - **Private ECR vs Public ECR**: 同一镜像 (vLLM 14.24GB)，私有 ECR 快 **4.2 倍**！
-> - **对比 AWS 官方基准** (m6i.8xlarge + SOCI 拉取 10GB 镜像: 45s)
-> - 本项目 p5.48xlarge 拉取 14.24GB 镜像仅需 **34.9s**，性能卓越！
+> **关键发现**：Private ECR vs Public ECR，同一镜像私有 ECR 快 **4.2 倍**！
 
 ### 参考文档
 
@@ -253,10 +262,10 @@ kubectl get nodes -w
 kubectl delete -f test/inflate.yaml
 ```
 
-### 测试 H100 GPU 节点
+### 测试 GPU 节点
 
 ```bash
-kubectl apply -f test/vllm-h100.yaml
+kubectl apply -f test/vllm-gpu.yaml
 kubectl get pods -w
 ```
 
@@ -272,7 +281,7 @@ kubectl get pods -w
 
 部署时会自动探测当前 region 的全部可用区（AZ），并在每个 AZ 创建 subnet。这样做的好处：
 
-1. **提高 Spot 获取成功率**: 更多 AZ = 更多 Spot 容量池，H100 等稀缺资源获取概率更高
+1. **提高 Spot 获取成功率**: 更多 AZ = 更多 Spot 容量池，GPU 等稀缺资源获取概率更高
 2. **更好的高可用性**: 工作负载可分散到更多 AZ
 3. **零额外成本**: 保持单一 NAT Gateway，不因 AZ 增加而增加成本
 
@@ -296,19 +305,6 @@ locals {
   region             = "ap-northeast-1"  # 修改为目标 Region
   # ...
 }
-```
-
-### 修改 GPU 实例类型
-
-如需使用其他 GPU 实例，修改 `main.tf` 中的 `nodepool_h100` 配置：
-
-```hcl
-# 例如改用 p4d.24xlarge (A100 GPU)
-requirements = [
-  { key = "karpenter.sh/capacity-type", operator = "In", values = ["spot", "on-demand"] },
-  { key = "kubernetes.io/arch", operator = "In", values = ["amd64"] },
-  { key = "node.kubernetes.io/instance-type", operator = "In", values = ["p4d.24xlarge"] }
-]
 ```
 
 ## Terraform Outputs
