@@ -85,8 +85,24 @@ locals {
   name                = "${var.cluster_name_prefix}-${random_string.suffix.result}"
   karpenter_discovery = local.name # 动态值，每个集群唯一，避免多集群 tag 冲突
 
-  # 自动探测并使用当前 region 的全部 AZ，提高 Spot 实例获取成功率
-  azs = data.aws_availability_zones.available.names
+  # 已知不支持 EKS 控制平面的 AZ
+  eks_control_plane_unsupported_azs = ["us-east-1e"]
+
+  # 所有可用 AZ（用于 Worker 节点，最大化 Spot 实例获取成功率）
+  all_azs = data.aws_availability_zones.available.names
+
+  # 支持 EKS 控制平面的 AZ 索引
+  control_plane_supported_indices = [
+    for i, az in local.all_azs : i
+    if !contains(local.eks_control_plane_unsupported_azs, az)
+  ]
+
+  # 控制平面只需 2-3 个 AZ，取前 3 个支持的
+  control_plane_az_indices = slice(
+    local.control_plane_supported_indices,
+    0,
+    min(3, length(local.control_plane_supported_indices))
+  )
 
   tags = {
     Example    = local.name
@@ -126,9 +142,13 @@ module "eks" {
     }
   }
 
-  vpc_id                   = module.vpc.vpc_id
-  subnet_ids               = module.vpc.private_subnets
-  control_plane_subnet_ids = module.vpc.intra_subnets
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnets # Worker 节点使用所有 AZ
+
+  # 控制平面只使用支持 EKS 的 AZ（排除如 us-east-1e 等不支持的 AZ）
+  control_plane_subnet_ids = [
+    for i in local.control_plane_az_indices : module.vpc.intra_subnets[i]
+  ]
 
   eks_managed_node_groups = {
     karpenter = {
@@ -177,15 +197,18 @@ module "vpc" {
   name = local.name
   cidr = var.vpc_cidr
 
-  azs = local.azs
+  azs = local.all_azs
 
   # Subnet CIDR 分配策略（支持最多 8 个 AZ）:
   # - Private /20: 10.0.0.0 - 10.0.127.255  (4,091 可用 IP/AZ，运行工作节点和 Pod)
   # - Public  /24: 10.0.128.0 - 10.0.191.255 (251 可用 IP/AZ，运行 NAT Gateway 和 ELB)
   # - Intra   /24: 10.0.192.0 - 10.0.255.255 (251 可用 IP/AZ，EKS Control Plane ENI)
-  private_subnets = [for k, v in local.azs : cidrsubnet(var.vpc_cidr, 4, k)]
-  public_subnets  = [for k, v in local.azs : cidrsubnet(var.vpc_cidr, 8, k + 128)]
-  intra_subnets   = [for k, v in local.azs : cidrsubnet(var.vpc_cidr, 8, k + 192)]
+  #
+  # Worker 节点使用所有 AZ 的 private_subnets，最大化 Spot 实例获取成功率
+  # 控制平面只使用支持 EKS 的 AZ 的 intra_subnets（在 EKS 模块中筛选）
+  private_subnets = [for k, v in local.all_azs : cidrsubnet(var.vpc_cidr, 4, k)]
+  public_subnets  = [for k, v in local.all_azs : cidrsubnet(var.vpc_cidr, 8, k + 128)]
+  intra_subnets   = [for k, v in local.all_azs : cidrsubnet(var.vpc_cidr, 8, k + 192)]
 
   enable_nat_gateway = true
   single_nat_gateway = true # 保持单一 NAT Gateway，节省成本（~$32/月 vs 多 AZ 的 ~$128/月）

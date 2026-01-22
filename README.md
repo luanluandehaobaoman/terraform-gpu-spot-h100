@@ -10,6 +10,15 @@ EKS 集群 Terraform 配置，支持 Karpenter 自动扩缩容和 **GPU Spot 实
 - **SOCI Parallel Pull Mode** - 加速大型 AI/ML 镜像拉取
 - **Bottlerocket OS** - 自带 NVIDIA Device Plugin
 
+### 可用区策略
+
+| 组件 | AZ 数量 | 说明 |
+|------|---------|------|
+| **Worker 节点** | 所有可用 AZ | 最大化 Spot 实例获取成功率 |
+| **控制平面** | 2-3 个 | 排除不支持 EKS 的 AZ（如 us-east-1e） |
+
+Worker 节点使用 Region 内所有可用区的 Private Subnets，提高 Spot 实例调度成功率。控制平面只需要 2-3 个 AZ 即可保证高可用，自动排除已知不支持 EKS 控制平面的 AZ。
+
 ## 目录结构
 
 ```
@@ -137,11 +146,33 @@ commands = [
 
 ```bash
 # 测试 Karpenter 扩缩容
-kubectl apply -f test/inflate.yaml
+cat <<EOF | kubectl apply -f -
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inflate
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: inflate
+  template:
+    metadata:
+      labels:
+        app: inflate
+    spec:
+      containers:
+      - name: inflate
+        image: public.ecr.aws/eks-distro/kubernetes/pause:3.7
+        resources:
+          requests:
+            cpu: 1
+EOF
+
 kubectl get nodes -w
 
-# 测试 GPU 节点
-kubectl apply -f test/vllm-gpu.yaml
+# 清理测试
+kubectl delete deployment inflate
 ```
 
 ## 清理
