@@ -3,9 +3,8 @@
 ################################################################################
 
 variable "region" {
-  description = "AWS region for deployment"
+  description = "AWS region for deployment (required)"
   type        = string
-  default     = "us-west-2"
 }
 
 variable "cluster_name_prefix" {
@@ -19,9 +18,8 @@ variable "cluster_name_prefix" {
 ################################################################################
 
 variable "gpu_instance_types" {
-  description = "GPU instance types for Karpenter NodePool. Examples: p5.48xlarge (H100), p4d.24xlarge (A100), g5.48xlarge (A10G)"
+  description = "GPU instance types for Karpenter NodePool (required). Examples: p5.48xlarge (H100), p4d.24xlarge (A100), g5.48xlarge (A10G)"
   type        = list(string)
-  default     = ["p5.48xlarge"]
 }
 
 variable "gpu_capacity_type" {

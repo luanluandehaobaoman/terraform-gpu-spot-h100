@@ -35,24 +35,34 @@ terraform-aws-eks/karpenter/        # 主要工作目录
 ```bash
 cd terraform-aws-eks/karpenter
 
+# 1. 配置必要变量（二选一）
+# 方式 A: 复制示例文件并修改
+cp terraform.tfvars.example terraform.tfvars
+# 编辑 terraform.tfvars 设置 region 和 gpu_instance_types
+
+# 方式 B: 使用命令行参数（见下方）
+
+# 2. 部署
 terraform init
 terraform plan
-terraform apply --auto-approve    # 约 15-20 分钟
+terraform apply --auto-approve
 ```
 
-**部署到其他 Region 或修改 GPU 类型**：
+**配置示例**：
 
 ```bash
-# 方式 1: 命令行参数
-terraform apply -var="region=ap-northeast-1" -var='gpu_instance_types=["p4d.24xlarge"]'
-
-# 方式 2: 创建 terraform.tfvars 文件
+# 方式 1: 使用 tfvars 文件（推荐）
 cat > terraform.tfvars <<EOF
-region = "ap-northeast-1"
-gpu_instance_types = ["p4d.24xlarge", "g5.48xlarge"]
+region = "us-west-2"
+gpu_instance_types = ["p5.48xlarge"]
 EOF
 terraform apply
+
+# 方式 2: 命令行参数
+terraform apply -var="region=ap-northeast-1" -var='gpu_instance_types=["p4d.24xlarge"]'
 ```
+
+> **注意**：`region` 和 `gpu_instance_types` 是必填变量，部署前必须配置。
 
 ### 配置 kubectl
 
@@ -71,11 +81,13 @@ kubectl get nodepools,ec2nodeclasses
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `region` | us-west-2 | AWS Region |
-| `gpu_instance_types` | ["p5.48xlarge"] | GPU 实例类型 |
+| `region` | **必填** | AWS Region |
+| `gpu_instance_types` | **必填** | GPU 实例类型 |
 | `gpu_capacity_type` | ["spot"] | spot 或 on-demand |
 | `vpc_cidr` | 10.0.0.0/16 | VPC CIDR |
 | `cluster_name_prefix` | eks-spot-gpu | 集群名称前缀 |
+
+详细配置说明见 `terraform.tfvars.example` 文件。
 
 ## NodePool 说明
 

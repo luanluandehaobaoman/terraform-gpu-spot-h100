@@ -1,0 +1,40 @@
+################################################################################
+# Required Variables - 必须配置
+################################################################################
+
+# AWS Region（必须配置）
+# 选择支持目标 GPU 实例类型的 Region
+# 常用 Region: us-west-2, us-east-1, ap-northeast-1, eu-west-1
+region = "us-west-2"
+
+# GPU 实例类型（必须配置）
+# 可选类型：
+#   - p5.48xlarge  : H100 80GB x8 (最新高端)
+#   - p4d.24xlarge : A100 40GB x8 (训练推荐)
+#   - p4de.24xlarge: A100 80GB x8 (大模型训练)
+#   - g5.48xlarge  : A10G 24GB x8 (推理推荐)
+#   - g5.xlarge    : A10G 24GB x1 (小规模测试)
+#   - g6.xlarge    : L4 24GB x1   (性价比推理)
+# 可配置多个类型提高 Spot 获取成功率
+gpu_instance_types = ["p5.48xlarge"]
+
+################################################################################
+# Optional Variables - 可选配置（有默认值）
+################################################################################
+
+# GPU 实例容量类型
+# gpu_capacity_type = ["spot"]           # 默认 Spot，节省成本
+# gpu_capacity_type = ["on-demand"]      # 按需实例，稳定性优先
+# gpu_capacity_type = ["spot", "on-demand"]  # 混合模式
+
+# VPC CIDR
+# vpc_cidr = "10.0.0.0/16"
+
+# 集群名称前缀
+# cluster_name_prefix = "eks-spot-gpu"
+
+# Karpenter 控制器节点配置
+# karpenter_node_instance_types = ["m5.large"]
+# karpenter_node_min_size = 2
+# karpenter_node_max_size = 3
+# karpenter_node_desired_size = 2
