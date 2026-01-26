@@ -43,3 +43,6 @@ __pycache__/
 
 # Helm cache (created by Terraform Helm provider)
 **/.helm/
+
+# Claude Code tasks (local only)
+tasks/
