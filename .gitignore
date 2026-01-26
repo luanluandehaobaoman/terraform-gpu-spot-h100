@@ -38,9 +38,6 @@ __pycache__/
 .DS_Store
 .idea
 
-# Test files (not for version control)
-**/test/
-
 # Helm cache (created by Terraform Helm provider)
 **/.helm/
 
